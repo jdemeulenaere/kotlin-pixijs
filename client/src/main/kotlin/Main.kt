@@ -1,8 +1,9 @@
 import PIXI.Graphics
-import PIXI.Application as PixiApplication
+import io.ktor.util.KtorExperimentalAPI
 import org.w3c.dom.HTMLCanvasElement
 import kotlin.browser.document
 import kotlin.browser.window
+import PIXI.Application as PixiApplication
 
 class Application {
     val application = PixiApplication()
@@ -33,8 +34,9 @@ class Application {
     }
 }
 
+@KtorExperimentalAPI
 fun main() {
-    Application()
+    println()
 }
 
 external fun scaleToWindow(view: HTMLCanvasElement): Double
