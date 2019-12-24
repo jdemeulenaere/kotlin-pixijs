@@ -15,7 +15,10 @@ dependencies {
 
 kotlin {
     sourceSets["main"].dependencies {
-        implementation(npm("pixi.js", "5.0.0-rc"))
+        implementation(npm("pixi.js", "5.2.0"))
     }
-    target.browser {}
+    target {
+        browser {}
+        useCommonJs()
+    }
 }
