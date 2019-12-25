@@ -1,5 +1,6 @@
 @file:Suppress("PackageName")
 @file:JsModule("pixi.js")
+@file:JsNonModule
 package PIXI
 
 import org.w3c.dom.HTMLCanvasElement
@@ -25,6 +26,7 @@ open external class DisplayObject {
 
 open external class Container : DisplayObject {
     fun addChild(vararg child: DisplayObject)
+    fun removeChild(child: DisplayObject)
 }
 
 open external class Graphics : Container {
