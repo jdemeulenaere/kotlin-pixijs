@@ -13,10 +13,18 @@ import io.ktor.websocket.webSocket
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonConfiguration
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 // Not thread-safe.
 class Game {
+    companion object {
+        private const val MIN_X = Constants.PLAYER_RADIUS
+        private const val MIN_Y = Constants.PLAYER_RADIUS
+        private const val MAX_X = Constants.MAP_WIDTH - Constants.PLAYER_RADIUS
+        private const val MAX_Y = Constants.MAP_HEIGHT - Constants.PLAYER_RADIUS
+    }
+
     var state = State(players = arrayListOf())
     val sessionToPlayer = hashMapOf<WebSocketSession, Player>()
     private var currentId = 0
@@ -24,21 +32,18 @@ class Game {
 
     fun addPlayer(session: WebSocketSession): Player {
         // Add a player with random position.
-        val x = random.nextInt(
-            from = Constants.PLAYER_RADIUS,
-            until = Constants.MAP_WIDTH - Constants.PLAYER_RADIUS + 1
-        )
+        val x = random.nextInt(from = MIN_X, until = MAX_X + 1)
+        val y = random.nextInt(from = MIN_Y, until = MAX_Y + 1)
 
-        val y = random.nextInt(
-            from = Constants.PLAYER_RADIUS,
-            until = Constants.MAP_HEIGHT - Constants.PLAYER_RADIUS + 1
-        )
-
+        val id = currentId++
+        val color = random.nextInt(256)
         val player = Player(
-            id = currentId++,
-            color = random.nextInt(256),
+            id = id,
+            color = color,
+            direction = id % 5,
             position = Coordinates(x, y),
-            speed = Coordinates(0, 0)
+            speed = Coordinates(0.0, 0.0),
+            acceleration = Coordinates(0.0, 0.0)
         )
 
         val previous = sessionToPlayer.put(session, player)
@@ -60,7 +65,29 @@ class Game {
     }
 
     fun tick(deltaMs: Long) {
+        for (player in state.players) {
+            // Compute horizontal and vertical acceleration.
+            var ax = 0.0
+            var ay = 0.0
+            for (direction in Direction.values()) {
+                if (player.direction and direction.flag != 0) {
+                    ax += direction.dx * Constants.ACCELERATION
+                    ay += direction.dy * Constants.ACCELERATION
+                }
+            }
 
+            // Speed and position.
+            player.speed.x = (player.speed.x + ax * deltaMs / 1_000)
+                .coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
+            player.speed.y = (player.speed.y + ay * deltaMs / 1_000)
+                .coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
+            player.position.x = (player.position.x + player.speed.x)
+                .roundToInt()
+                .coerceIn(MIN_X, MAX_X)
+            player.position.y = (player.position.y + player.speed.y)
+                .roundToInt()
+                .coerceIn(MIN_Y, MAX_Y)
+        }
     }
 }
 

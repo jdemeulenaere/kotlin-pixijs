@@ -25,7 +25,7 @@ class Game {
         renderer.view.style.display = "block"
         renderer.autoDensity = true
         renderer.backgroundColor = 0x63ccff
-        renderer.resize(1024, 768)
+        renderer.resize(Constants.MAP_WIDTH, Constants.MAP_HEIGHT)
     }
 
     fun sync(state: State) {
