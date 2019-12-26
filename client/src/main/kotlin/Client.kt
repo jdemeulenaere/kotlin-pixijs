@@ -7,7 +7,6 @@ import io.ktor.http.cio.websocket.Frame
 import io.ktor.http.cio.websocket.readText
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonConfiguration
-import org.w3c.dom.HTMLCanvasElement
 import kotlin.browser.document
 import PIXI.Application
 import com.github.jdemeulenaere.game.shared.Constants
@@ -71,29 +70,35 @@ suspend fun main() {
 
     val json = Json(JsonConfiguration.Default)
     val session = client.webSocketSession(port = 8000)
+    val keyboardHandler = KeyboardHandler(session)
+
     for (frame in session.incoming) {
         when (frame) {
             is Frame.Text -> {
                 val message = try {
-                    json.parse(ServerMessage.serializer(), frame.readText())
+                    try {
+                        val text = frame.readText()
+                        json.parse(ServerMessage.serializer(), text)
+                    } catch (e: Exception) {
+                        println("Failed to read text from server: $e")
+                        null
+                    }
                 } catch (e: Exception) {
-                    println("Failed to parse frame from server: $frame")
+                    println("Failed to parse frame from server: $e")
                     null
                 }
 
                 when (message) {
                     is ServerMessage.SetState -> {
                         val state = message.state
-                        println("Received state from server: $state")
                         game.sync(state)
                     }
                 }
             }
             else -> println("Received unsupported frame from server: $frame")
         }
-        println("Server said $frame")
     }
+
+    keyboardHandler.unsubscribe()
     session.close()
 }
-
-external fun scaleToWindow(view: HTMLCanvasElement): Double

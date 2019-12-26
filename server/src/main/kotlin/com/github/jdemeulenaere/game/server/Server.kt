@@ -10,14 +10,17 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.websocket.WebSockets
 import io.ktor.websocket.webSocket
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonConfiguration
+import java.util.concurrent.Executors
 import kotlin.math.roundToInt
 import kotlin.random.Random
 
 // Not thread-safe.
-class Game {
+class Game private constructor() {
     companion object {
         private const val MIN_X = Constants.PLAYER_RADIUS
         private const val MIN_Y = Constants.PLAYER_RADIUS
@@ -25,47 +28,93 @@ class Game {
         private const val MAX_Y = Constants.MAP_HEIGHT - Constants.PLAYER_RADIUS
     }
 
-    var state = State(players = arrayListOf())
-    val sessionToPlayer = hashMapOf<WebSocketSession, Player>()
-    private var currentId = 0
-    private val random = Random(System.currentTimeMillis())
+    // Utility class that ensures that all calls to Game are executed in the same thread.
+    class Holder {
+        private val game = Game()
+        private val dispatcher = Executors.newSingleThreadExecutor().asCoroutineDispatcher()
 
-    fun addPlayer(session: WebSocketSession): Player {
+        suspend fun withGame(f: suspend Game.() -> Unit) {
+            withContext(dispatcher) {
+                game.f()
+            }
+        }
+    }
+
+    private val sessionToPlayer = hashMapOf<WebSocketSession, Player>()
+    private val json = Json(JsonConfiguration.Default)
+    private val random = Random(System.currentTimeMillis())
+    private val state = State(players = emptyList())
+    private var currentId = 0
+
+    suspend fun handleSession(session: WebSocketSession) {
+        val player = addPlayer(session)
+        println("Player ${player.id} entered the game.")
+        listenPlayer(session, player)
+        println("Player ${player.id} left the game!")
+        removePlayer(session)
+    }
+
+    private fun addPlayer(session: WebSocketSession): Player {
         // Add a player with random position.
         val x = random.nextInt(from = MIN_X, until = MAX_X + 1)
         val y = random.nextInt(from = MIN_Y, until = MAX_Y + 1)
 
-        val id = currentId++
         val color = random.nextInt(256)
         val player = Player(
-            id = id,
+            id = currentId++,
             color = color,
-            direction = id % 5,
+            direction = 0,
             position = Coordinates(x, y),
             speed = Coordinates(0.0, 0.0),
             acceleration = Coordinates(0.0, 0.0)
         )
 
         val previous = sessionToPlayer.put(session, player)
-        state.players.add(player)
+        state.players = sessionToPlayer.values.toList()
         if (previous != null) {
             println("Weird, player $previous was already associated to $session")
-            state.players.remove(previous)
         }
+
         return player
     }
 
-    fun removePlayer(session: WebSocketSession) {
+    private fun removePlayer(session: WebSocketSession) {
         val previous = sessionToPlayer.remove(session)
-        if (previous != null) {
-            state.players.remove(previous)
-        } else {
+        state.players = sessionToPlayer.values.toList()
+
+        if (previous == null) {
             println("Weird, no player was associated to $session")
         }
     }
 
-    fun tick(deltaMs: Long) {
-        for (player in state.players) {
+    private suspend fun listenPlayer(session: WebSocketSession, player: Player) {
+        // Messages from player.
+        for (frame in session.incoming) {
+            when (frame) {
+                is Frame.Text -> {
+                    val message = try {
+                        json.parse(ClientMessage.serializer(), frame.readText())
+                    } catch (e: Exception) {
+                        println("Failed to parse frame from client: $frame")
+                        null
+                    }
+
+                    message?.let { handleClientMessage(player, message) }
+                }
+                else -> println("Received unexpected frame: $frame")
+            }
+        }
+    }
+
+    private fun handleClientMessage(player: Player, message: ClientMessage) {
+        when (message) {
+            is ClientMessage.SetDirection -> player.direction = message.direction
+        }
+    }
+
+    suspend fun tick(deltaMs: Long) {
+        // Compute new state.
+        for (player in sessionToPlayer.values) {
             // Compute horizontal and vertical acceleration.
             var ax = 0.0
             var ay = 0.0
@@ -76,11 +125,22 @@ class Game {
                 }
             }
 
-            // Speed and position.
-            player.speed.x = (player.speed.x + ax * deltaMs / 1_000)
-                .coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
-            player.speed.y = (player.speed.y + ay * deltaMs / 1_000)
-                .coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
+            // Speed.
+            if (ax == 0.0) {
+                player.speed.x = 0.0
+            } else {
+                player.speed.x = (player.speed.x + ax * deltaMs / 1_000)
+                    .coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
+            }
+
+            if (ay == 0.0) {
+                player.speed.y = 0.0
+            } else {
+                player.speed.y = (player.speed.y + ay * deltaMs / 1_000)
+                    .coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
+            }
+
+            // Position.
             player.position.x = (player.position.x + player.speed.x)
                 .roundToInt()
                 .coerceIn(MIN_X, MAX_X)
@@ -88,36 +148,29 @@ class Game {
                 .roundToInt()
                 .coerceIn(MIN_Y, MAX_Y)
         }
+
+        // Broadcast.
+        val msg = ServerMessage.SetState(state)
+        val text = json.stringify(ServerMessage.serializer(), msg)
+        sessionToPlayer.keys.forEach { session ->
+            try {
+                session.send(Frame.Text(text))
+            } catch (e: Exception) {
+                println("Failed to send frame to $session. Exception: $e")
+            }
+        }
     }
 }
 
 fun main() {
-    val game = Game()
-    val json = Json(JsonConfiguration.Default)
+    val gameHolder = Game.Holder()
 
     val server = embeddedServer(Netty, port = 8000) {
         install(WebSockets)
         routing {
             webSocket("/") {
-                // Player enters game.
-                val player = synchronized(game) {
-                    game.addPlayer(this)
-                }
-                println("Player ${player.id} entered the game.")
-
-                // Messages from player.
-                for (frame in incoming) {
-                    when (frame) {
-                        is Frame.Text -> println("Player said: ${frame.readText()}")
-                        else -> println("Received unexpected frame: $frame")
-                    }
-                }
-
-                // Player left the game.
-                println("Player ${player.id} left the game!")
-                synchronized(game) {
-                    game.removePlayer(this)
-                }
+                val session = this
+                gameHolder.withGame { handleSession(session) }
             }
         }
     }
@@ -135,26 +188,13 @@ fun main() {
     while (true) {
         loop++
         updateNext()
-        while (System.currentTimeMillis() < next) {}
+        while (System.currentTimeMillis() < next) {
+        }
         val current = System.currentTimeMillis()
 
         // Tick the game state.
         runBlocking {
-            val (state, sessions) = synchronized(game) {
-                game.tick(current - lastTick)
-                game.state to game.sessionToPlayer.keys
-            }
-
-            // Broadcast the game state to all clients.
-            val msg = ServerMessage.SetState(state)
-            val text = json.stringify(ServerMessage.serializer(), msg)
-            val frame = Frame.Text(text)
-            println("Broadcasting $text")
-            sessions.forEach { session ->
-                try {
-                    session.send(frame)
-                } catch (e: Exception) {}
-            }
+            gameHolder.withGame { tick(current - lastTick) }
         }
 
         lastTick = current

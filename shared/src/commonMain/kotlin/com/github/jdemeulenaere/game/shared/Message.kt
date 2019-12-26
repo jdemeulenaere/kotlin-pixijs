@@ -9,7 +9,13 @@ sealed class ServerMessage {
 }
 
 @Serializable
-data class State(val players: MutableList<Player>)
+sealed class ClientMessage {
+    @Serializable
+    class SetDirection(val direction: Int) : ClientMessage()
+}
+
+@Serializable
+data class State(var players: List<Player>)
 
 @Serializable
 data class Player(
