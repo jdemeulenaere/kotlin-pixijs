@@ -1,7 +1,6 @@
 import org.w3c.dom.HTMLCanvasElement
 
 external fun keyboard(keyValue: String): Keyboard
-external fun scaleToWindow(view: HTMLCanvasElement): Double
 
 interface Keyboard {
     var press: (() -> Unit)?
