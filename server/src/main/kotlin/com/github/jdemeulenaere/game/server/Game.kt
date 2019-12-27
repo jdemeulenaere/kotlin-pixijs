@@ -3,6 +3,7 @@ package com.github.jdemeulenaere.game.server
 import com.github.jdemeulenaere.game.shared.ClientMessage
 import com.github.jdemeulenaere.game.shared.Constants
 import com.github.jdemeulenaere.game.shared.Coordinates
+import com.github.jdemeulenaere.game.shared.Direction
 import com.github.jdemeulenaere.game.shared.Player
 import com.github.jdemeulenaere.game.shared.ServerMessage
 import com.github.jdemeulenaere.game.shared.State
@@ -132,11 +133,4 @@ class Game private constructor() {
             else -> min(0.0, currentSpeed) + acceleration * deltaMs / 1_000
         }.coerceIn(-Constants.MAX_SPEED, Constants.MAX_SPEED)
     }
-}
-
-enum class Direction(val flag: Int, val dx: Int = 0, val dy: Int = 0) {
-    UP(1, dy = -1),
-    DOWN(1 shl 1, dy = +1),
-    LEFT(1 shl 2, dx = -1),
-    RIGHT(1 shl 3, dx = +1)
 }
